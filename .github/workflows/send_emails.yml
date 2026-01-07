@@ -2,11 +2,15 @@ name: Send batch emails hourly
 
 on:
   schedule:
-    - cron: '*/5 * * * *'   # للاختبار: كل 5 دقائق (UTC). بعد التحقق غيّر إلى '0 * * * *'
+    - cron: '0 * * * *'   # التشغيل الإنتاجي: كل ساعة عند الدقيقة 0 (UTC)
   workflow_dispatch: {}
 
 permissions:
   contents: write
+
+concurrency:
+  group: send-emails
+  cancel-in-progress: false
 
 jobs:
   send:
@@ -16,12 +20,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: true
-
-      - name: Show current time (debug)
-        run: |
-          echo "UTC now: $(date -u)"
-          echo "GITHUB_REF: $GITHUB_REF"
-          echo "GITHUB_SHA: $GITHUB_SHA"
 
       - name: Set up Python
         uses: actions/setup-python@v4
