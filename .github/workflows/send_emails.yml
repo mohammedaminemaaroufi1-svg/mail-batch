@@ -2,12 +2,11 @@ name: Send batch emails hourly
 
 on:
   schedule:
-    # كل ساعة عند الدقيقة 0
-    - cron: '0 * * * *'
-  workflow_dispatch: {}  # للتشغيل اليدوي
+    - cron: '*/5 * * * *'   # للاختبار: كل 5 دقائق (UTC). بعد التحقق غيّر إلى '0 * * * *'
+  workflow_dispatch: {}
 
 permissions:
-  contents: write  # للسماح بعمل commit/push لملف sent.json
+  contents: write
 
 jobs:
   send:
@@ -16,16 +15,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: true  # يسمح باستخدام GITHUB_TOKEN للـ push
+          persist-credentials: true
+
+      - name: Show current time (debug)
+        run: |
+          echo "UTC now: $(date -u)"
+          echo "GITHUB_REF: $GITHUB_REF"
+          echo "GITHUB_SHA: $GITHUB_SHA"
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
-
-      - name: Install dependencies (none required)
-        run: |
-          python -V
+          python-version: '3.10'
 
       - name: Run send script
         env:
@@ -33,8 +34,6 @@ jobs:
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # GITHUB_ACTOR موجود تلقائياً ولكن يمكن تعيينه هنا أيضاً
         run: |
           chmod +x send_batch.py
           python send_batch.py
