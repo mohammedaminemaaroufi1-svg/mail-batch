@@ -21,23 +21,16 @@ MAX_PER_RUN = 1            # <<--- أرسل رسالة واحدة فقط في ك
 SMTP_RETRY_ATTEMPTS = 3
 SMTP_RETRY_BASE = 5        # ثواني (لـ exponential backoff)
 
-SUBJECT = "Bewerbung um einen Ausbildungsplatz"
+SUBJECT = "Anfrage zu einer Ausbildung im Pflegebereich"
 BODY = """Sehr geehrte Damen und Herren,
-
 hiermit bewerbe ich mich um einen Ausbildungsplatz als Pflegefachmann oder Pflegefachhelfer.
-
-Ich heiße Mohamed Amine Maaroufi, habe das Abitur, ein B2-Deutschzertifikat sowie einige zusätzliche Qualifikationen.
-
-Ich bin sehr motiviert, diesen Beruf zu erlernen und einen Beitrag zur Pflege und Unterstützung von Menschen zu leisten.
-
-Im Anhang finden Sie meine vollständigen Bewerbungsunterlagen.
-
-Ich freue mich sehr auf eine positive Rückmeldung von Ihnen.
-
+Mein Name ist Mohamed Amine Maaroufi. Ich habe das Abitur und ein Deutschzertifikat auf dem Niveau B2.
+Gerne möchte ich nachfragen, ob Sie Bewerbungen von ausländischen Bewerbern annehmen und ob Sie ein anerkannter Ausbildungsbetrieb sind.
+Meine Bewerbungsunterlagen finden Sie im Anhang.
 Mit freundlichen Grüßen
 Mohamed Amine Maaroufi
 Marokko
-+212 7 03355677
++212 7 03 35 56 77
 mohammed.amine.maaroufi1@gmail.com
 """
 
