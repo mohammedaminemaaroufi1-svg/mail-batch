@@ -1,39 +1,38 @@
 #!/usr/bin/env python3
 """
 send_batch.py
-- يقرأ emails.csv (عمود مُسمّى "Email")
-- يرسل إلى 10 عناوين غير مُرسَلَة بعد لكل تشغيل
-- يخزّن العناوين التي أرسِلَت في sent.json
-- يدفع (commit + push) sent.json إلى الريبو بحيث لا يعاد الإرسال
+- كل تشغيل يرسل رسالة واحدة إلى أول عنوان لم يُرسَل له بعد (حسب emails.csv و sent.json)
+- إعادة محاولة SMTP حتى 3 مرات (exponential backoff)
+- يسجّل إلى sent.json و sent.log
+- يقوم بعمل commit+push لـ sent.json فقط إن تغيّر
 """
 
-import os
-import csv
-import json
-import smtplib
-import ssl
-import mimetypes
+import os, csv, json, time, smtplib, ssl, mimetypes, subprocess, sys
 from email.message import EmailMessage
-import subprocess
-import sys
 from pathlib import Path
+from datetime import datetime
 
-# -------------------------
-# إعداد المسارات والملفات
 ROOT = Path.cwd()
 CSV_PATH = ROOT / "emails.csv"
 SENT_PATH = ROOT / "sent.json"
-ATTACHMENTS_DIR = ROOT / "attachments"  # إن أردت إرفاق ملفات ارفعها هنا
-MAX_PER_RUN = 10
-# -------------------------
+LOG_PATH = ROOT / "sent.log"
+ATTACHMENTS_DIR = ROOT / "attachments"
+MAX_PER_RUN = 1            # <<--- أرسل رسالة واحدة فقط في كل تشغيل
+SMTP_RETRY_ATTEMPTS = 3
+SMTP_RETRY_BASE = 5        # ثواني (لـ exponential backoff)
 
-# نص الرسالة (خذته من رسالتك)
+SUBJECT = "Bewerbung um einen Ausbildungsplatz"
 BODY = """Sehr geehrte Damen und Herren,
 
-Sehr geehrte Damen und Herren,
-mein Name ist Mohamed Amine Maaroufi, ich lebe in Marokko und habe das Abitur sowie ein B2-Deutschzertifikat. Zudem verfüge ich über Qualifikationen im Gesundheitsbereich.
-Ich interessiere mich sehr für eine Ausbildung in der Pflege in Ihrer Einrichtung und möchte gerne wissen, ob Sie Bewerbungen von ausländischen Kandidaten annehmen und welche Voraussetzungen dafür gelten.
-Über eine Rückmeldung würde ich mich sehr freuen.
+hiermit bewerbe ich mich um einen Ausbildungsplatz als Pflegefachmann oder Pflegefachhelfer.
+
+Ich heiße Mohamed Amine Maaroufi, habe das Abitur, ein B2-Deutschzertifikat sowie einige zusätzliche Qualifikationen.
+
+Ich bin sehr motiviert, diesen Beruf zu erlernen und einen Beitrag zur Pflege und Unterstützung von Menschen zu leisten.
+
+Im Anhang finden Sie meine vollständigen Bewerbungsunterlagen.
+
+Ich freue mich sehr auf eine positive Rückmeldung von Ihnen.
 
 Mit freundlichen Grüßen
 Mohamed Amine Maaroufi
@@ -42,46 +41,50 @@ Marokko
 mohammed.amine.maaroufi1@gmail.com
 """
 
-SUBJECT = "Bewerbung um einen Ausbildungsplatz"
+def log(s):
+    ts = datetime.utcnow().isoformat() + "Z"
+    line = f"[{ts}] {s}"
+    print(line)
+    try:
+        with LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 
 def load_emails(csv_path):
     if not csv_path.exists():
-        print("ERROR: emails.csv not found.", file=sys.stderr)
+        log("ERROR: emails.csv not found.")
         sys.exit(1)
     emails = []
     with csv_path.open(newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
-        # إذا الملف فيه فقط عمود واحد بلا رأس، ندعمه أيضاً
-        if not reader.fieldnames:
+        if reader.fieldnames:
+            # العثور على عمود Email أو استعمال العمود الأول
+            col = None
+            for name in reader.fieldnames:
+                if name and name.strip().lower() == "email":
+                    col = name
+                    break
+            if col is None:
+                col = reader.fieldnames[0]
+            for r in reader:
+                val = r.get(col)
+                if val:
+                    emails.append(val.strip())
+        else:
             f.seek(0)
-            for row in csv.reader(f):
-                if row:
-                    emails.append(row[0].strip())
-            return emails
-        # نحاول العثور على العمود الذي يحتوي على كلمة Email (بأي حالة)
-        col = None
-        for name in reader.fieldnames:
-            if name and name.strip().lower() == "email":
-                col = name
-                break
-        if col is None:
-            # خذ أول عمود كافتراضي
-            col = reader.fieldnames[0]
-        for r in reader:
-            val = r.get(col)
-            if val:
-                emails.append(val.strip())
-    # إزالة الفارغات وتكرارات بسيطة
+            for r in csv.reader(f):
+                if r:
+                    emails.append(r[0].strip())
+    # تنظيف وتوحيد
     seen = set()
-    clean = []
+    out = []
     for e in emails:
-        if not e:
-            continue
-        if e in seen:
-            continue
+        if not e: continue
+        if e in seen: continue
         seen.add(e)
-        clean.append(e)
-    return clean
+        out.append(e)
+    return out
 
 def load_sent(path):
     if not path.exists():
@@ -94,7 +97,7 @@ def load_sent(path):
 def save_sent(path, sent_list):
     path.write_text(json.dumps(sent_list, indent=2, ensure_ascii=False), encoding='utf-8')
 
-def attach_files(msg, attachments_dir: Path):
+def attach_files(msg, attachments_dir):
     if not attachments_dir.exists() or not attachments_dir.is_dir():
         return
     for p in sorted(attachments_dir.iterdir()):
@@ -109,47 +112,55 @@ def attach_files(msg, attachments_dir: Path):
             data = f.read()
         msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=p.name)
 
-def send_email(smtp_server, smtp_port, smtp_user, smtp_pass, recipient, subject, body, attachments_dir):
+def send_email_once(smtp_server, smtp_port, smtp_user, smtp_pass, recipient, subject, body, attachments_dir):
     msg = EmailMessage()
     msg['From'] = smtp_user
     msg['To'] = recipient
     msg['Subject'] = subject
     msg.set_content(body)
     attach_files(msg, attachments_dir)
-
-    # SMTP over SSL (port 465)
     context = ssl.create_default_context()
-    with smtplib.SMTP_SSL(smtp_server, int(smtp_port), context=context) as server:
-        server.login(smtp_user, smtp_pass)
-        server.send_message(msg)
 
-def git_commit_and_push(filepaths, actor):
-    # تأكد أن git موجود
+    last_exc = None
+    for attempt in range(1, SMTP_RETRY_ATTEMPTS + 1):
+        try:
+            # استخدم SMTP SSL (port 465)
+            with smtplib.SMTP_SSL(smtp_server, int(smtp_port), context=context, timeout=30) as server:
+                server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+            return True, None
+        except Exception as e:
+            last_exc = e
+            wait = SMTP_RETRY_BASE * (2 ** (attempt - 1))
+            log(f"Warning: send attempt {attempt} to {recipient} failed: {e} — retry in {wait}s")
+            time.sleep(wait)
+    return False, last_exc
+
+def git_commit_and_push_if_changed(filepaths, actor):
     try:
         subprocess.run(["git", "--version"], check=True, stdout=subprocess.DEVNULL)
     except Exception as e:
-        print("git not available:", e)
+        log(f"git not available: {e}")
         return False
-
-    # جهّز معلومات المؤلف من GITHUB_ACTOR إن وجدت
-    actor_name = actor or "github-actions"
+    actor_name = actor or os.getenv("GITHUB_ACTOR") or "github-actions"
     actor_email = f"{actor_name}@users.noreply.github.com"
-
-    subprocess.run(["git", "config", "user.name", actor_name], check=True)
-    subprocess.run(["git", "config", "user.email", actor_email], check=True)
-
-    # أضف، كومِت، وبوش
-    add_cmd = ["git", "add"] + filepaths
-    subprocess.run(add_cmd, check=True)
-    commit_msg = f"Update sent list ({', '.join(filepaths)})"
     try:
+        subprocess.run(["git", "config", "user.name", actor_name], check=True)
+        subprocess.run(["git", "config", "user.email", actor_email], check=True)
+        subprocess.run(["git", "add"] + filepaths, check=True)
+        commit_msg = f"Update sent list: {', '.join(filepaths)}"
+        res = subprocess.run(["git", "diff", "--staged", "--quiet"])
+        # إذا هناك تغييرات ستقوم العملية commit
         subprocess.run(["git", "commit", "-m", commit_msg], check=True)
-    except subprocess.CalledProcessError:
-        print("Nothing to commit.")
+        subprocess.run(["git", "push"], check=True)
+        log("Committed and pushed changes.")
         return True
-    # push؛ في GitHub Actions يجب أن تعمل persist-credentials=true في checkout
-    subprocess.run(["git", "push"], check=True)
-    return True
+    except subprocess.CalledProcessError as e:
+        log("No changes to commit or commit failed.")
+        return False
+    except Exception as ex:
+        log(f"Commit/push failed: {ex}")
+        return False
 
 def main():
     smtp_server = os.getenv("SMTP_SERVER")
@@ -157,7 +168,7 @@ def main():
     smtp_user = os.getenv("SMTP_USER")
     smtp_pass = os.getenv("SMTP_PASS")
     if not all([smtp_server, smtp_port, smtp_user, smtp_pass]):
-        print("ERROR: SMTP credentials not set in environment variables.", file=sys.stderr)
+        log("ERROR: SMTP credentials not set in environment variables.")
         sys.exit(1)
 
     emails = load_emails(CSV_PATH)
@@ -165,35 +176,37 @@ def main():
     unsent = [e for e in emails if e not in sent]
 
     if not unsent:
-        print("No unsent emails left. Exiting.")
+        log("No unsent addresses left. Exiting.")
         return
 
     to_send = unsent[:MAX_PER_RUN]
-    print(f"Will send to {len(to_send)} recipients this run.")
+    log(f"Will send to {len(to_send)} recipient(s) this run.")
 
     sent_now = []
     for recipient in to_send:
-        try:
-            print(f"Sending to {recipient} ...")
-            send_email(smtp_server, smtp_port, smtp_user, smtp_pass, recipient, SUBJECT, BODY, ATTACHMENTS_DIR)
-            print("Sent.")
+        log(f"Sending to {recipient} ...")
+        ok, exc = send_email_once(smtp_server, smtp_port, smtp_user, smtp_pass, recipient, SUBJECT, BODY, ATTACHMENTS_DIR)
+        if ok:
+            log(f"Sent to {recipient}.")
             sent.append(recipient)
             sent_now.append(recipient)
+        else:
+            log(f"Failed to send to {recipient}: {exc}")
+
+    if sent_now:
+        # احفظ sent.json
+        try:
+            save_sent(SENT_PATH, sent)
+            log(f"Saved sent.json ({len(sent)} total).")
+        except Exception as e:
+            log(f"Failed to save sent.json: {e}")
+
+        # حاول commit+push فقط إذا تغيّر sent.json
+        gh_actor = os.getenv("GITHUB_ACTOR")
+        try:
+            git_commit_and_push_if_changed([str(SENT_PATH)], gh_actor)
         except Exception as ex:
-            print(f"Failed to send to {recipient}: {ex}", file=sys.stderr)
-
-    # احفظ ملف sent.json
-    save_sent(SENT_PATH, sent)
-    print(f"Saved sent.json with {len(sent)} addresses.")
-
-    # حاول عمل commit + push
-    gh_actor = os.getenv("GITHUB_ACTOR")
-    try:
-        success = git_commit_and_push([str(SENT_PATH)], gh_actor)
-        if success:
-            print("Committed and pushed sent.json (if changed).")
-    except Exception as ex:
-        print("Commit/push failed:", ex)
+            log(f"Commit/push error: {ex}")
 
 if __name__ == "__main__":
     main()
