@@ -30,15 +30,10 @@ MAX_PER_RUN = 10
 # نص الرسالة (خذته من رسالتك)
 BODY = """Sehr geehrte Damen und Herren,
 
-hiermit bewerbe ich mich um einen Ausbildungsplatz als Pflegefachmann oder Pflegefachhelfer.
-
-Ich heiße Mohamed Amine Maaroufi, habe das Abitur, ein B2-Deutschzertifikat sowie einige zusätzliche Qualifikationen.
-
-Ich bin sehr motiviert, diesen Beruf zu erlernen und einen Beitrag zur Pflege und Unterstützung von Menschen zu leisten.
-
-Im Anhang finden Sie meine vollständigen Bewerbungsunterlagen.
-
-Ich freue mich sehr auf eine positive Rückmeldung von Ihnen.
+Sehr geehrte Damen und Herren,
+mein Name ist Mohamed Amine Maaroufi, ich lebe in Marokko und habe das Abitur sowie ein B2-Deutschzertifikat. Zudem verfüge ich über Qualifikationen im Gesundheitsbereich.
+Ich interessiere mich sehr für eine Ausbildung in der Pflege in Ihrer Einrichtung und möchte gerne wissen, ob Sie Bewerbungen von ausländischen Kandidaten annehmen und welche Voraussetzungen dafür gelten.
+Über eine Rückmeldung würde ich mich sehr freuen.
 
 Mit freundlichen Grüßen
 Mohamed Amine Maaroufi
