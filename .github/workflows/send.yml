@@ -1,10 +1,6 @@
 name: Send Emails
 
 on:
-  schedule:
-    - cron: '33 * * * *'
-      timezone: 'Africa/Casablanca'
-
   workflow_dispatch:
 
 permissions:
