@@ -1,0 +1,25 @@
+name: Send Emails Z
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run script
+        env:
+          SMTP_PASS_Z: ${{ secrets.SMTP_PASS_Z }}
+        run: python send_emails_z.py
